@@ -28,25 +28,6 @@ Lo frenado entra a la cola como `blocked`: se ve, se corrige y se aprueba a mano
 Un «aprobar todos» nunca lo toca, y aprobar re-audita el texto final — si lo
 editaste, la compuerta mira lo editado.
 
-## Campañas: hoy no hay ninguna
-
-La del desayuno (28 de agosto de 2026) se retiró el 25/08: su evento caía en tres
-días y su paso 1 era una invitación **con nota**, que no es la cadencia que se va
-a operar. `_ALL` en `backend/campaigns.py` está vacío a propósito.
-
-Consecuencia que hay que tener presente: **el botón «Secuencia» del Pipeline no
-tiene dónde inscribir**. `POST /api/sequences/enroll` responde 400 («no hay
-ninguna secuencia con copy aprobado») en vez de inscribir gente contra un copy
-que no existe, y la página Secuencia muestra ese estado en claro.
-
-Lo que quedó listo para la que la reemplace:
-
-- **`Campaign` y `Step`** con copy versionado en código, tope duro por paso,
-  corte, festivos de Colombia y la variante en primera persona para cuando firma
-  el propio anfitrión.
-- **La marca y el tono** (`_MARCA`, `_ESTILO`), que son reutilizables.
-- **La compuerta** (`guard.py`), el sembrado idempotente y el preflight.
-
 ## Amplemarket es quien envía
 
 El outreach sale por Amplemarket. El reparto:
