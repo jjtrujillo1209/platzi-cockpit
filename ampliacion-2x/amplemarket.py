@@ -1,0 +1,1 @@
+/Users/juanjosetrujillo/Documents/Ai programas/PLATZI/prospeccion-2000/amplemarket.py

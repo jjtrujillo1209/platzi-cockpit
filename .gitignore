@@ -1,0 +1,32 @@
+# Datos locales: perfiles de Chrome, cookies, contactos, logs
+data/
+**/data/
+*.db
+*.db-*
+*.db.bak-*
+*.log
+*.csv
+*_budget.json
+.remember/
+
+# Secretos
+.env
+.env.*
+!.env.example
+li_cookies.json
+
+# Entornos y builds
+.venv/
+__pycache__/
+node_modules/
+dist/
+*.tsbuildinfo
+.archive/
+
+# Respaldos y artefactos
+*.bak*
+*.bak-*
+*.tar.gz
+*.sha256
+.DS_Store
+*.patch
