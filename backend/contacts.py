@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import re
 import shutil
 import threading
@@ -28,6 +29,8 @@ import calls_store
 import hubspot_check
 import store
 from config import DEDUP_CSV
+
+log = logging.getLogger("contacts")
 
 _WRITE_LOCK = threading.Lock()
 
@@ -43,7 +46,7 @@ def _cross_hubspot(contact_id: int, email: str, empresa: str) -> None:
         if res.get("ok"):
             store.set_hubspot(contact_id, res.get("verdict", ""), res.get("reason", ""))
     except Exception:
-        pass
+        log.exception("cruce con HubSpot falló para el contacto %s", contact_id)
 
 # Defaults que siguen la convención de la base (filas existentes).
 _NEW_ROW_DEFAULTS = {

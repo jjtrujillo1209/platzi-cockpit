@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import logging
 import os
 import signal
 import itertools
@@ -38,6 +39,7 @@ from runs import read_jsonl
 
 load_dotenv(ENV_FILE)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+log = logging.getLogger("jobs")
 
 
 _seq = itertools.count(1)
@@ -148,7 +150,7 @@ class Job:
             try:
                 store.finish_job(self.job_id, self._status)
             except Exception:
-                pass
+                log.exception("no se pudo cerrar el job %s en store", self.job_id)
         return self._status
 
     def stop(self) -> None:
@@ -161,7 +163,7 @@ class Job:
         try:
             store.finish_job(self.job_id, "stopped")
         except Exception:
-            pass
+            log.exception("no se pudo marcar detenido el job %s", self.job_id)
 
     def progress(self) -> dict:
         events = [e for e in read_jsonl(self.events_file) if e.get("idx", 0) != 0]
@@ -201,7 +203,7 @@ class JobManager:
         try:
             store.log_job(run_id, channel, total, params, events_file.name)
         except Exception:
-            pass
+            log.exception("no se pudo registrar el job %s en store", run_id)
         return job
 
     # ---- LinkedIn connections -------------------------------------------

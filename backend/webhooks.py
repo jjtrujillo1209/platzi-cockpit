@@ -6,9 +6,17 @@ run_id). Guardamos el payload crudo en data_json para no perder nada.
 """
 from __future__ import annotations
 
+import base64
 import json
+import logging
+import os
 import uuid
 from datetime import datetime, timezone
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import load_der_public_key
 
 import sendgrid_stats
 import store
@@ -23,6 +31,34 @@ _ACTIVITY_TYPE = {
     "bounce": "bounce", "bounced": "bounce", "dropped": "bounce",
     "spamreport": "spam", "spam": "spam", "complained": "spam",
 }
+
+
+log = logging.getLogger("webhooks")
+_aviso_sin_llave = False
+
+
+def firma_valida(cuerpo: bytes, firma_b64: str, timestamp: str) -> bool:
+    """Verifica el Signed Event Webhook de SendGrid (ECDSA P-256 + SHA-256 sobre
+    timestamp + cuerpo crudo). Sin esto, quien conozca la URL de ngrok podía
+    inyectar un `bounce` falso y pausar secuencias reales.
+
+    La llave pública sale de SendGrid (Settings → Mail Settings → Signed Event
+    Webhook) y va en SENDGRID_WEBHOOK_PUBLIC_KEY. Mientras no esté, se acepta
+    todo como antes y se avisa una vez en el log."""
+    global _aviso_sin_llave
+    llave_b64 = os.environ.get("SENDGRID_WEBHOOK_PUBLIC_KEY", "").strip()
+    if not llave_b64:
+        if not _aviso_sin_llave:
+            log.warning("SENDGRID_WEBHOOK_PUBLIC_KEY sin definir: el webhook no verifica firma")
+            _aviso_sin_llave = True
+        return True
+    try:
+        llave = load_der_public_key(base64.b64decode(llave_b64))
+        llave.verify(base64.b64decode(firma_b64), timestamp.encode() + cuerpo,
+                     ec.ECDSA(hashes.SHA256()))
+        return True
+    except (InvalidSignature, ValueError, TypeError):
+        return False
 
 
 def _to_local(ts_iso: str) -> str:

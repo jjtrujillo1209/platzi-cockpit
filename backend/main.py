@@ -15,8 +15,11 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 import asyncio
+import hmac
 import json
+import logging
 import os
+from urllib.parse import urlsplit
 
 import agentes as agentes_mod
 import apollo_budget as apollo_budget_mod
@@ -55,15 +58,43 @@ from config import BACKEND_DIR, DEDUP_CSV, PUBLIC_BASE_URL, TEMPLATES_DIR, TRACK
 from jobs import manager, tail_events
 from runs import list_runs, run_detail
 
+# Los loops de fondo y los handlers que antes hacían `except: pass` ahora dejan
+# el traceback aquí; launchd manda stdout/stderr a ~/Library/Logs/platzi/.
+logging.basicConfig(level=logging.INFO, format="[%(name)s] %(levelname)s %(message)s")
+log = logging.getLogger("main")
+
 app = FastAPI(title="Platzi Cockpit API", version="1.0")
 # Assets de la landing de invitación (logo). Público: lo abre el invitado.
 app.mount("/static", StaticFiles(directory=BACKEND_DIR / "static"), name="static")
+
+# Orígenes de navegador que pueden hablarle a la API. Con `*` y el login
+# apagado, cualquier página abierta en el Chrome del Mac podía leer contactos o
+# aprobar envíos contra 127.0.0.1:8532. La UI entra por el proxy de Vite.
+_UI_ORIGINS = tuple(
+    o.strip() for o in os.environ.get(
+        "PLATZI_UI_ORIGINS",
+        "http://127.0.0.1:5181,http://localhost:5181,http://127.0.0.1:5183,http://localhost:5183",
+    ).split(",") if o.strip()
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=list(_UI_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _origen_permitido(headers) -> bool:
+    """CORS solo impide LEER la respuesta: un POST simple desde otra página igual
+    se ejecuta. Por eso además se rechaza cualquier petición con `Origin` ajeno.
+    Sin `Origin` (curl, scripts, la máquina de prospección) pasa; con el mismo
+    host de la petición (landing de invitación por ngrok) también."""
+    origen = headers.get("origin")
+    if origen is None:
+        return True
+    if origen in _UI_ORIGINS:
+        return True
+    return urlsplit(origen).netloc == headers.get("host", "")
 
 # Rutas abiertas aunque el login esté activo (config de login, el propio login,
 # health y el webhook de SendGrid que llega desde fuera). El WS se valida aparte.
@@ -115,6 +146,13 @@ async def solo_lo_publico_por_el_tunel(request: Request, call_next):
             and ruta not in _TUNEL_EXACTAS \
             and not any(ruta.startswith(p) for p in _TUNEL_PREFIJOS):
         return JSONResponse({"error": "No existe esa ruta"}, status_code=404)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def solo_origenes_propios(request: Request, call_next):
+    if not _origen_permitido(request.headers):
+        return JSONResponse({"error": "origen no permitido"}, status_code=403)
     return await call_next(request)
 
 
@@ -410,13 +448,13 @@ async def _heartbeat_loop():
     try:
         await heartbeat_mod.run_snapshot(check_linkedin=False)
     except Exception:
-        pass
+        log.exception("heartbeat inicial falló")
     while True:
         await asyncio.sleep(HEARTBEAT_HOURS * 3600)
         try:
             await heartbeat_mod.run_snapshot(check_linkedin=HEARTBEAT_LI, headless=True)
         except Exception:
-            pass
+            log.exception("heartbeat falló")
 
 
 @app.on_event("startup")
@@ -434,7 +472,7 @@ async def _nube_loop():
             if r.get("recibidos") or r.get("error"):
                 print(f"[nube] {r}", flush=True)
         except Exception:
-            pass
+            log.exception("sincronización con la nube falló")
         await asyncio.sleep(60)
 
 
@@ -1534,7 +1572,7 @@ async def webhook_amplemarket(secret: str, request: Request) -> dict:
     registra esa URL completa en Amplemarket.
     """
     esperado = store.kv_get("amplemarket_webhook_secret", "").strip()
-    if not esperado or secret != esperado:
+    if not esperado or not hmac.compare_digest(secret, esperado):
         return JSONResponse({"error": "secreto inválido"}, status_code=403)
     payload = await request.json()
     tipo = (payload.get("type") or payload.get("event") or "").lower()
@@ -1900,7 +1938,9 @@ def job_stop(job_id: str) -> dict:
 
 @app.websocket("/ws/jobs/{job_id}")
 async def ws_job(ws: WebSocket, job_id: str):
-    if _desde_fuera(ws.headers, ws.headers.get("host", "")):
+    # Los WebSocket no pasan por CORS: sin esto, otra página podía abrir el canal.
+    if _desde_fuera(ws.headers, ws.headers.get("host", "")) \
+            or not _origen_permitido(ws.headers):
         await ws.close(code=1008)
         return
     if auth_mod.enabled() and not auth_mod.verify_session(ws.query_params.get("token", "")):
@@ -1998,8 +2038,14 @@ def telefonos_apollo_pedir(stage: str = "conectado", limite: int = 0,
 
 @app.post("/api/webhooks/sendgrid")
 async def sendgrid_webhook(request: Request) -> dict:
+    cuerpo = await request.body()
+    if not webhooks_mod.firma_valida(
+            cuerpo,
+            request.headers.get("x-twilio-email-event-webhook-signature", ""),
+            request.headers.get("x-twilio-email-event-webhook-timestamp", "")):
+        return JSONResponse({"error": "firma inválida"}, status_code=403)
     try:
-        payload = await request.json()
+        payload = json.loads(cuerpo)
     except Exception:
         return {"received": 0}
     events = payload if isinstance(payload, list) else [payload]

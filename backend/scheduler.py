@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import random
 from datetime import date, datetime, timedelta
@@ -43,6 +44,8 @@ from config import RESULTS_DIR, TRACKING_DB
 from contacts import _norm_li
 from jobs import manager
 from runs import read_jsonl
+
+log = logging.getLogger("scheduler")
 
 TICK_MINUTES = float(os.environ.get("PLATZI_AGENT_TICK_MIN", "15"))
 
@@ -745,5 +748,7 @@ async def loop() -> None:
         try:
             await asyncio.to_thread(tick)
         except Exception:
-            pass
+            # Antes era `pass`: si el tick fallaba, el copiloto dejaba de avanzar
+            # secuencias sin rastro. Sigue el loop, pero queda el traceback.
+            log.exception("tick del copiloto falló")
         await asyncio.sleep(TICK_MINUTES * 60)

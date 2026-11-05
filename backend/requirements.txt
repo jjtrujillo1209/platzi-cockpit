@@ -5,3 +5,4 @@ python-dotenv>=1.0
 # pandas, requests y playwright ya vienen en el venv de prospector-flow
 
 google-auth>=2.30
+cryptography>=42
